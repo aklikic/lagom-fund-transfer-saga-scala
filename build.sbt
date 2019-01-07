@@ -1,7 +1,7 @@
 logLevel := Level.Debug
 
 lazy val root = (project in file("."))
-  .settings(name := "online-auction-scala")
+  .settings(name := "lagom-fund-transfer-saga-scala")
   .aggregate(accountApi, accountImpl,
              fundTransferApi, fundTransferImpl)
   .settings(commonSettings: _*)
@@ -10,6 +10,8 @@ organization in ThisBuild := "com.klikix"
 
 // the Scala version that will be used for cross-compiled libraries
 scalaVersion in ThisBuild := "2.12.7"
+EclipseKeys.projectFlavor in Global := EclipseProjectFlavor.Scala
+reactiveLibVersion in ThisBuild := "0.9.3"
 
 version in ThisBuild := "1.0.0-SNAPSHOT"
 
@@ -18,6 +20,19 @@ val macwire = "com.softwaremill.macwire" %% "macros" % "2.3.1" % "provided"
 val scalaTest = "org.scalatest" %% "scalatest" % "3.0.5" % Test
 val scalaTestPlusPlay = "org.scalatestplus.play" %% "scalatestplus-play" % "3.1.2" % Test
 val mockito = "org.mockito" % "mockito-core" % "2.23.4" % Test
+val scalaLogging = "com.typesafe.scala-logging" %% "scala-logging" % "3.9.0"
+val cassandraDriverExtras = "com.datastax.cassandra" % "cassandra-driver-extras" % "3.0.0"
+
+lazy val util = (project in file("util"))
+  .settings(commonSettings: _*)
+  .settings(
+    libraryDependencies ++= Seq(
+      lagomScaladslApi,
+      lagomScaladslServer % Optional,
+      playJsonDerivedCodecs,
+      scalaTest
+    )
+  )
 
 lazy val accountApi = (project in file("account-api"))
   .settings(commonSettings: _*)
@@ -27,6 +42,7 @@ lazy val accountApi = (project in file("account-api"))
       playJsonDerivedCodecs
     )
   )
+  .dependsOn(util)
 
 lazy val accountImpl = (project in file("account-impl"))
   .settings(commonSettings: _*)
@@ -36,13 +52,14 @@ lazy val accountImpl = (project in file("account-impl"))
       lagomScaladslPersistenceCassandra,
       lagomScaladslTestKit,
       lagomScaladslKafkaBroker,
-      "com.datastax.cassandra" % "cassandra-driver-extras" % "3.0.0",
+      cassandraDriverExtras,
       macwire,
-      scalaTest
+      scalaTest,
+      scalaLogging
     )
   )
   .settings(lagomForkedTestSettings: _*)
-  .dependsOn(accountApi,fundTransferApi)
+  .dependsOn(accountApi)
 
 lazy val fundTransferApi = (project in file("fund-transfer-api"))
   .settings(commonSettings: _*)
@@ -52,6 +69,7 @@ lazy val fundTransferApi = (project in file("fund-transfer-api"))
       playJsonDerivedCodecs
     )
   )
+  .dependsOn(util)
 
 lazy val fundTransferImpl = (project in file("fund-transfer-impl"))
   .settings(commonSettings: _*)
@@ -61,9 +79,10 @@ lazy val fundTransferImpl = (project in file("fund-transfer-impl"))
       lagomScaladslPersistenceCassandra,
       lagomScaladslTestKit,
       lagomScaladslKafkaBroker,
-      "com.datastax.cassandra" % "cassandra-driver-extras" % "3.0.0",
+      cassandraDriverExtras,
       macwire,
-      scalaTest
+      scalaTest,
+      scalaLogging
     )
   )
   .settings(lagomForkedTestSettings: _*)

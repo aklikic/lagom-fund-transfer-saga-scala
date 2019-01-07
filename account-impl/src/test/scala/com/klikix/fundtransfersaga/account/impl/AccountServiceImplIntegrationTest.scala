@@ -1,12 +1,9 @@
-package com.example.auction.item.impl
+package com.klikix.fundtransfersaga.account.impl
 
 import java.time.Duration
 import java.util.UUID
 
 import akka.stream.scaladsl.Sink
-import com.example.auction.item.api
-import com.example.auction.item.api.{ItemService, ItemSummary}
-import com.example.auction.security.ClientSecurity._
 import com.lightbend.lagom.scaladsl.api.AdditionalConfiguration
 import com.lightbend.lagom.scaladsl.server.{LagomApplication, LocalServiceLocator}
 import com.lightbend.lagom.scaladsl.testkit.{ServiceTest, TestTopicComponents}
@@ -17,11 +14,17 @@ import play.api.libs.ws.ahc.AhcWSComponents
 import scala.collection.immutable.Seq
 import scala.concurrent.duration._
 import scala.concurrent.{Future, Promise}
+import com.klikix.fundtransfersaga.account.api.AccountService
+import com.klikix.fundtransfersaga.account.api.CreateAccountRequest
+import com.klikix.fundtransfersaga.account.api.AccountStatus
+import com.klikix.fundtransfersaga.account.api.AccountEvent
+import com.klikix.fundtransfersaga.account.api.AccountCreated
+import com.klikix.fundtransfersaga.account.api.AccountClosed
 
-class ItemServiceImplIntegrationTest extends AsyncWordSpec with Matchers with BeforeAndAfterAll {
+class AccountServiceImplIntegrationTest extends AsyncWordSpec with Matchers with BeforeAndAfterAll {
 
   private val server = ServiceTest.startServer(ServiceTest.defaultSetup.withCassandra(true)) { ctx =>
-    new LagomApplication(ctx) with ItemComponents with LocalServiceLocator with AhcWSComponents with TestTopicComponents {
+    new LagomApplication(ctx) with AccountComponents with LocalServiceLocator with AhcWSComponents with TestTopicComponents {
       override def additionalConfiguration: AdditionalConfiguration =
         super.additionalConfiguration ++ ConfigFactory.parseString(
           "cassandra-query-journal.eventual-consistency-delay = 0"
@@ -29,76 +32,66 @@ class ItemServiceImplIntegrationTest extends AsyncWordSpec with Matchers with Be
     }
   }
 
-  val itemService = server.serviceClient.implement[ItemService]
+  val accountService = server.serviceClient.implement[AccountService]
 
   import server.materializer
 
   override def afterAll = server.stop()
 
-  "The Item service" should {
+  "The Account service" should {
 
-    "allow creating items" in {
-      val creatorId = UUID.randomUUID
+    "allow creating accounts" in {
+      val ownerUid = UUID.randomUUID
+      val accountUid = UUID .randomUUID
+      val initialAmount = 0
       for {
-        created <- createItem(creatorId, sampleItem(creatorId))
-        retrieved <- retrieveItem(created)
+        created <- createAccount(ownerUid, initialAmount)
+        retrieved <- getAccount(created.accountUid)
+        events: Seq[AccountEvent] <- accountService.accountEvents.subscribe.atMostOnceSource
+        .filter(_.accountUid == created.accountUid)
+        .take(1)
+        .runWith(Sink.seq)
       } yield {
-        created should ===(retrieved)
+        created.accountUid should ===(retrieved.accountUid)
+        events.size shouldBe 1
+        events.head shouldBe an[AccountCreated]
       }
+      
     }
-
-    "return all items for a given user" in {
-      val tom = UUID.randomUUID
-      val jerry = UUID.randomUUID
-      val tomItem = sampleItem(tom)
-      val jerryItem = sampleItem(jerry)
-      (for {
-        _ <- createItem(jerry, jerryItem)
-        createdTomItem <- createItem(tom, tomItem)
-      } yield {
-        awaitSuccess() {
-          for {
-            items <- itemService.getItemsForUser(tom, api.ItemStatus.Created, None).invoke()
-          } yield {
-            items.count should ===(1)
-            items.items should contain only ItemSummary(createdTomItem.safeId, tomItem.title, tomItem.currencyId,
-              tomItem.reservePrice, tomItem.status)
-          }
-        }
-      }).flatMap(identity)
-    }
-
-    "emit auction started event" in {
-      val creatorId = UUID.randomUUID
+    
+    "allow closing accounts" in {
+      val ownerUid = UUID.randomUUID
+      val accountUid = UUID .randomUUID
+      val initialAmount = 0
       for {
-        createdItem <- createItem(creatorId, sampleItem(creatorId))
-        _ <- startAuction(creatorId, createdItem)
-        events: Seq[api.ItemEvent] <- itemService.itemEvents.subscribe.atMostOnceSource
-          .filter(_.itemId == createdItem.safeId)
-          .take(2)
-          .runWith(Sink.seq)
+        created <- createAccount(ownerUid, initialAmount) 
+        closed <- closeAccount(created.accountUid)
+        retrieved <- getAccount(created.accountUid)
+        events: Seq[AccountEvent] <- accountService.accountEvents.subscribe.atMostOnceSource
+        .filter(_.accountUid == created.accountUid)
+        .take(2)
+        .runWith(Sink.seq)
       } yield {
+        retrieved.status should ===(AccountStatus.Closed)
         events.size shouldBe 2
-        events.head shouldBe an[api.ItemUpdated]
-        events.drop(1).head shouldBe an[api.AuctionStarted]
+        events.head shouldBe an[AccountCreated]
+        events.drop(1).head shouldBe an[AccountClosed]
       }
     }
+
+    //TODO other test cases
   }
 
-  private def sampleItem(creatorId: UUID) = {
-    api.Item.create(creatorId, "title", "description", "USD", 10, 10, Duration.ofMinutes(10))
+  private def createAccount(ownerUid: UUID, initialAmount: Int) = {
+    accountService.createAccount.invoke(CreateAccountRequest.apply(None, ownerUid, Some(initialAmount)))
+  }
+  
+  private def closeAccount(accountUid: UUID) = {
+    accountService.closeAccount(accountUid).invoke
   }
 
-  private def createItem(creatorId: UUID, createItem: api.Item) = {
-    itemService.createItem.handleRequestHeader(authenticate(creatorId)).invoke(createItem)
-  }
-
-  private def retrieveItem(item: api.Item) = {
-    itemService.getItem(item.safeId).invoke
-  }
-
-  private def startAuction(creatorId: UUID, createdItem: api.Item) = {
-    itemService.startAuction(createdItem.safeId).handleRequestHeader(authenticate(creatorId)).invoke
+  private def getAccount(accountUid: UUID) = {
+    accountService.getAccount(accountUid).invoke
   }
 
   def awaitSuccess[T](maxDuration: FiniteDuration = 10.seconds, checkEvery: FiniteDuration = 100.milliseconds)(block: => Future[T]): Future[T] = {

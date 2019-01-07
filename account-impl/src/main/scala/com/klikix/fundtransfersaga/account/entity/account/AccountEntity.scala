@@ -1,4 +1,4 @@
-package com.example.auction.item.impl
+package com.klikix.fundtransfersaga.account.entity.account
 
 import java.time.{Duration, Instant}
 import java.util.UUID
@@ -7,198 +7,111 @@ import akka.Done
 import com.lightbend.lagom.scaladsl.persistence.PersistentEntity.ReplyType
 import com.lightbend.lagom.scaladsl.persistence.{AggregateEvent, AggregateEventTag, PersistentEntity}
 import play.api.libs.json.{Format, Json}
-import com.example.auction.utils.JsonFormats._
+import com.klikix.util.general.JsonFormats._
+import java.time.OffsetDateTime
+import com.klikix.fundtransfersaga.account.entity.account._
 
-class ItemEntity extends PersistentEntity {
-  override type Command = ItemCommand
-  override type Event = ItemEvent
-  override type State = Option[Item]
 
-  override def initialState: Option[Item] = None
+
+class AccountEntity extends PersistentEntity {
+  override type Command = AccountCommand
+  override type Event = AccountEvent
+  override type State = Option[Account]
+
+  override def initialState: Option[Account] = None
 
   override def behavior: Behavior = {
     case None => notCreated
-    case Some(item) if item.status == ItemStatus.Created => created(item)
-    case Some(item) if item.status == ItemStatus.Auction => auction(item)
-    case Some(item) if item.status == ItemStatus.Completed => completed
-    case Some(item) if item.status == ItemStatus.Cancelled => cancelled
+    case Some(account) if account.status == AccountStatus.Created => created(account)
+    case Some(account) if account.status == AccountStatus.Closed => closed(account)
   }
-
-  private val getItemCommand = Actions().onReadOnlyCommand[GetItem.type, Option[Item]] {
-    case (GetItem, ctx, state) => ctx.reply(state)
-  }
-
+ 
   private val notCreated = {
-    Actions().onCommand[CreateItem, Done] {
-      case (CreateItem(item), ctx, state) =>
-        ctx.thenPersist(ItemCreated(item))(_ => ctx.reply(Done))
+    Actions()
+    .onCommand[CreateAccount, Done] {
+      case (CreateAccount(account), ctx, state) =>
+        ctx.thenPersist(AccountCreated.apply(account,OffsetDateTime.now))(_ => ctx.reply(Done))
     }.onEvent {
-      case (ItemCreated(item), state) => Some(item)
-    }.orElse(getItemCommand)
+      case (AccountCreated(account, _), state) => Some(account)
+    }.orElse(other(Some("Account does not exist")))
   }
-
-  private def created(item: Item) = {
-    Actions().onCommand[StartAuction, Done] {
-      case (StartAuction(userId), ctx, _) =>
-        if (item.creator != userId) {
-          ctx.invalidCommand("Only the creator of an auction can start it")
+  
+  private def created (account: Account) = {
+    Actions()
+    .onReadOnlyCommand[CreateAccount, Done] {
+      case (_, ctx, _) => ctx.reply(Done)
+    }.onCommand[AddFunds,Done]{
+      case (AddFunds(transactionUid,amountToAdd),ctx,_) => 
+        val newAccount = account.addFunds(amountToAdd)
+        ctx.thenPersist(FundsAdded.apply(transactionUid,amountToAdd,newAccount.amount,account.amount,OffsetDateTime.now))(_ => ctx.reply(Done))
+    }.onCommand[AddFundsRollback,Done]{
+      case (AddFundsRollback(transactionUid,amountAdded,rollbackReason),ctx,state) => 
+        val newAccount = account.addFundsRollback(amountAdded) 
+        if(newAccount.amount<0){
+          ctx.invalidCommand("After add rollback funds can not be less then 0")
           ctx.done
-        } else {
-          ctx.thenPersist(AuctionStarted(Instant.now()))(_ => ctx.reply(Done))
         }
+        ctx.thenPersist(FundsAddRollbacked.apply(transactionUid,amountAdded,newAccount.amount,state.get.amount,rollbackReason,OffsetDateTime.now))(_ => ctx.reply(Done))
+    }.onCommand[RemoveFunds,Done]{
+      case (RemoveFunds(transactionUid,amountToRemove),ctx,_) => 
+        val newAccount = account.removeFunds(amountToRemove)
+        if(newAccount.amount<0){
+          ctx.invalidCommand("Insufficient funds")
+          ctx.done
+        }
+        ctx.thenPersist(FundsRemoved.apply(transactionUid,amountToRemove,newAccount.amount,account.amount,OffsetDateTime.now))(_ => ctx.reply(Done))
+    }.onCommand[RemoveFundsRollback,Done]{
+      case (RemoveFundsRollback(transactionUid,amountRemoved,rollbackReason),ctx,_) => 
+        val newAccount = account.removeFundsRollback(amountRemoved) 
+        ctx.thenPersist(FundsRemoveRollbacked.apply(transactionUid,amountRemoved,newAccount.amount,account.amount,rollbackReason,OffsetDateTime.now))(_ => ctx.reply(Done))
+    
+    }.onCommand[CloseAccount.type,Done]{
+      case (_,ctx,_) => 
+        if(account.amount!=0){
+          ctx.invalidCommand("Need to empty funds before closing account")
+          ctx.done
+        }
+        val closedAccount = account.close
+        ctx.thenPersist(AccountClosed.apply(closedAccount,OffsetDateTime.now))(_ => ctx.reply(Done))
     }.onEvent {
-      case (AuctionStarted(time), Some(item)) => Some(item.start(time))
-    }.orElse(getItemCommand)
+      case (FundsAdded( _, amountToAdd, _, _, _), state) => state.map(_.addFunds(amountToAdd))
+      case (FundsAddRollbacked( _, amountAdded, _, _, _, _), state) => state.map(_.addFundsRollback(amountAdded))
+      case (FundsRemoved( _, amountToRemove, _, _, _), state) => state.map(_.removeFunds(amountToRemove))
+      case (FundsRemoveRollbacked( _, amountRemoved, _, _, _, _), state) => state.map(_.removeFundsRollback(amountRemoved))
+      case (AccountClosed( _, _), state) => state.map(_.close)
+    }.orElse(other(None))
   }
-
-  private def auction(item: Item) = {
-    Actions().onCommand[UpdatePrice, Done] {
-      case (UpdatePrice(price), ctx, _) =>
-        ctx.thenPersist(PriceUpdated(price))(_ => ctx.reply(Done))
-    }.onCommand[FinishAuction, Done] {
-      case (FinishAuction(winner, price), ctx, _) =>
-        ctx.thenPersist(AuctionFinished(winner, price))(_ => ctx.reply(Done))
-    }.onEvent {
-      case (PriceUpdated(price), _) => Some(item.updatePrice(price))
-      case (AuctionFinished(winner, price), _) => Some(item.end(winner, price))
-    }.onReadOnlyCommand[StartAuction, Done] {
+  
+   private def closed (account: Account) = {
+    Actions()
+    .onReadOnlyCommand[CloseAccount.type, Done] {
       case (_, ctx, _) => ctx.reply(Done)
-    }.orElse(getItemCommand)
+    }.orElse(other(Some("Account is closed")))
+  }
+   
+  private def other (maybeMessage: Option[String]) = { 
+    val message = maybeMessage.getOrElse("N/A");
+    Actions()
+    .onReadOnlyCommand[CreateAccount, Done] {
+      case (_, ctx, _) => ctx.invalidCommand(message)
+    }.onReadOnlyCommand[AddFunds, Done] {
+      case (_, ctx, _) => ctx.invalidCommand(message)
+    }.onReadOnlyCommand[AddFundsRollback, Done] {
+      case (_, ctx, _) => ctx.invalidCommand(message)
+    }.onReadOnlyCommand[RemoveFunds, Done] {
+      case (_, ctx, _) => ctx.invalidCommand(message)
+    }.onReadOnlyCommand[RemoveFundsRollback, Done] {
+      case (_, ctx, _) => ctx.invalidCommand(message)
+    }.onReadOnlyCommand[CloseAccount.type, Done] {
+      case (_, ctx, _) => ctx.invalidCommand(message)
+    }.onReadOnlyCommand[GetAccount.type, Option[Account]] {
+      case (GetAccount, ctx, state) => ctx.reply(state)
+    }
   }
 
-  private val completed = {
-    Actions().onReadOnlyCommand[UpdatePrice, Done] {
-      case (_, ctx, _) => ctx.reply(Done)
-    }.onReadOnlyCommand[FinishAuction, Done] {
-      case (_, ctx, _) => ctx.reply(Done)
-    }.onReadOnlyCommand[StartAuction, Done] {
-      case (_, ctx, _) => ctx.reply(Done)
-    }.orElse(getItemCommand)
-  }
-
-  private val cancelled = completed
-
-}
   
-object ItemStatus extends Enumeration {
-  val Created, Auction, Completed, Cancelled = Value
-  type Status = Value
-  
-  implicit val format: Format[Status] = enumFormat(ItemStatus)
-}
-
-case class Item(
-  id: UUID,
-  creator: UUID,
-  title: String,
-  description: String,
-  currencyId: String,
-  increment: Int,
-  reservePrice: Int,
-  price: Option[Int],
-  status: ItemStatus.Status,
-  auctionDuration: Duration,
-  auctionStart: Option[Instant],
-  auctionEnd: Option[Instant],
-  auctionWinner: Option[UUID]
-) {
-  
-  def start(startTime: Instant) = {
-    assert(status == ItemStatus.Created)
-    copy(
-      status = ItemStatus.Auction,
-      auctionStart = Some(startTime), 
-      auctionEnd = Some(startTime.plus(auctionDuration))
-    )
+  private def entityUid(): UUID = {
+    UUID.fromString(entityId)
   }
 
-  def end(winner: Option[UUID], price: Option[Int]) = {
-    assert(status == ItemStatus.Auction)
-    copy(
-      status = ItemStatus.Completed,
-      price = price,
-      auctionWinner = winner
-    )
-  }
-
-  def updatePrice(price: Int) = {
-    assert(status == ItemStatus.Auction)
-    copy(
-      price = Some(price)
-    )
-  }
-
-  def cancel = {
-    assert(status == ItemStatus.Auction || status == ItemStatus.Completed)
-    copy(
-      status = ItemStatus.Cancelled
-    )
-  }
-}
-
-object Item {
-  implicit val format: Format[Item] = Json.format
-}
-
-sealed trait ItemCommand
-
-case object GetItem extends ItemCommand with ReplyType[Option[Item]] {
-  implicit val format: Format[GetItem.type] = singletonFormat(GetItem)
-}
-
-case class CreateItem(item: Item) extends ItemCommand with ReplyType[Done]
-  
-object CreateItem {
-  implicit val format: Format[CreateItem] = Json.format
-}
-  
-case class StartAuction(userId: UUID) extends ItemCommand with ReplyType[Done]
-
-object StartAuction {
-  implicit val format: Format[StartAuction] = Json.format
-}
-
-case class UpdatePrice(price: Int) extends ItemCommand with ReplyType[Done]
-
-object UpdatePrice {
-  implicit val format: Format[UpdatePrice] = Json.format
-}
-
-case class FinishAuction(winner: Option[UUID], price: Option[Int]) extends ItemCommand with ReplyType[Done]
-
-object FinishAuction {
-  implicit val format: Format[FinishAuction] = Json.format
-}
-
-sealed trait ItemEvent extends AggregateEvent[ItemEvent] {
-  override def aggregateTag = ItemEvent.Tag
-}
-
-object ItemEvent {
-  val NumShards = 4
-  val Tag = AggregateEventTag.sharded[ItemEvent](NumShards)
-}
-
-case class ItemCreated(item: Item) extends ItemEvent
-
-object ItemCreated {
-  implicit val format: Format[ItemCreated] = Json.format
-}
-
-case class AuctionStarted(startTime: Instant) extends ItemEvent
-
-object AuctionStarted {
-  implicit val format: Format[AuctionStarted] = Json.format
-}
-
-case class PriceUpdated(price: Int) extends ItemEvent
-
-object PriceUpdated {
-  implicit val format: Format[PriceUpdated] = Json.format
-}
-
-case class AuctionFinished(winner: Option[UUID], price: Option[Int]) extends ItemEvent
-
-object AuctionFinished {
-  implicit val format: Format[AuctionFinished] = Json.format
 }

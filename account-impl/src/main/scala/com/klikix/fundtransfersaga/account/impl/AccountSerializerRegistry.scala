@@ -1,20 +1,28 @@
-package com.example.auction.item.impl
+package com.klikix.fundtransfersaga.account.impl
 
 import com.lightbend.lagom.scaladsl.playjson.{JsonSerializerRegistry, JsonSerializer}
+import com.klikix.fundtransfersaga.account.entity.account._
 
-object ItemSerializerRegistry extends JsonSerializerRegistry {
+object AccountSerializerRegistry extends JsonSerializerRegistry {
   override def serializers = List(
-    JsonSerializer[Item],
+    JsonSerializer[Account],
 
-    JsonSerializer[CreateItem],
-    JsonSerializer[StartAuction],
-    JsonSerializer[UpdatePrice],
-    JsonSerializer[FinishAuction],
-    JsonSerializer[GetItem.type],
+    JsonSerializer[CreateAccount],
+    JsonSerializer[CloseAccount.type],
+    JsonSerializer[GetAccount.type],
+    JsonSerializer[AddFunds],
+    JsonSerializer[AddFundsRollback],
+    JsonSerializer[RemoveFunds],
+    JsonSerializer[RemoveFundsRollback],
 
-    JsonSerializer[ItemCreated],
-    JsonSerializer[AuctionStarted],
-    JsonSerializer[PriceUpdated],
-    JsonSerializer[AuctionFinished]
+    JsonSerializer[AccountCreated],
+    JsonSerializer[AccountClosed],
+    JsonSerializer[FundsAdded],
+    JsonSerializer[FundsAddRollbacked],
+    //JsonSerializer[FundsAddRollbackFailed],
+    JsonSerializer[FundsRemoved],
+    //JsonSerializer[FundsRemoveFailed],
+    JsonSerializer[FundsRemoveRollbacked]//,
+    //JsonSerializer[FundsRemoveRollbackFailed]
   )
 }

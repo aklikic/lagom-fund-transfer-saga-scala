@@ -1,8 +1,7 @@
-package com.example.auction.item.impl
+package com.klikix.fundtransfersaga.account.impl
 
 import akka.stream.Materializer
-import com.example.auction.bidding.api.BiddingService
-import com.example.auction.item.api.ItemService
+import com.klikix.fundtransfersaga.account.api.AccountService
 import com.lightbend.lagom.scaladsl.broker.kafka.LagomKafkaComponents
 import com.lightbend.lagom.scaladsl.devmode.LagomDevModeComponents
 import com.lightbend.lagom.scaladsl.persistence.cassandra.CassandraPersistenceComponents
@@ -13,8 +12,9 @@ import play.api.Environment
 import play.api.libs.ws.ahc.AhcWSComponents
 
 import scala.concurrent.ExecutionContext
+import com.klikix.fundtransfersaga.account.entity.account.AccountEntity
 
-trait ItemComponents extends LagomServerComponents
+trait AccountComponents extends LagomServerComponents
   with CassandraPersistenceComponents {
 
   implicit def executionContext: ExecutionContext
@@ -22,30 +22,26 @@ trait ItemComponents extends LagomServerComponents
 
   implicit def materializer: Materializer
 
-  override lazy val lagomServer = serverFor[ItemService](wire[ItemServiceImpl])
-  lazy val itemRepository = wire[ItemRepository]
-  lazy val jsonSerializerRegistry = ItemSerializerRegistry
+  override lazy val lagomServer = serverFor[AccountService](wire[AccountServiceImpl])
+  lazy val jsonSerializerRegistry = AccountSerializerRegistry
 
-  persistentEntityRegistry.register(wire[ItemEntity])
-  readSide.register(wire[ItemEventProcessor])
+  persistentEntityRegistry.register(wire[AccountEntity])
+ 
 }
 
-abstract class ItemApplication(context: LagomApplicationContext) extends LagomApplication(context)
-  with ItemComponents
+abstract class AccountApplication(context: LagomApplicationContext) extends LagomApplication(context)
+  with AccountComponents
   with AhcWSComponents
   with LagomKafkaComponents {
 
-  lazy val biddingService = serviceClient.implement[BiddingService]
-
-  wire[BiddingServiceSubscriber]
 }
 
-class ItemApplicationLoader extends LagomApplicationLoader {
+class AccountApplicationLoader extends LagomApplicationLoader {
   override def loadDevMode(context: LagomApplicationContext): LagomApplication =
-    new ItemApplication(context) with LagomDevModeComponents
+    new AccountApplication(context) with LagomDevModeComponents
 
   override def load(context: LagomApplicationContext): LagomApplication =
-    new ItemApplication(context) with LagomServiceLocatorComponents
+    new AccountApplication(context) with LagomServiceLocatorComponents
 
-  override def describeService = Some(readDescriptor[ItemService])
+  override def describeService = Some(readDescriptor[AccountService])
 }
