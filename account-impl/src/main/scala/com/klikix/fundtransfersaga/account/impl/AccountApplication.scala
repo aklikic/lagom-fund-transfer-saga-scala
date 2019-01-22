@@ -13,9 +13,10 @@ import play.api.libs.ws.ahc.AhcWSComponents
 
 import scala.concurrent.ExecutionContext
 import com.klikix.fundtransfersaga.account.entity.account.AccountEntity
+import com.lightbend.lagom.scaladsl.pubsub.PubSubComponents
 
 trait AccountComponents extends LagomServerComponents
-  with CassandraPersistenceComponents {
+  with CassandraPersistenceComponents with PubSubComponents {
 
   implicit def executionContext: ExecutionContext
   def environment: Environment

@@ -40,8 +40,16 @@ import com.klikix.fundtransfersaga.account.entity.account.FundsAdded
 import com.klikix.fundtransfersaga.account.entity.account.FundsAddRollbacked
 import com.klikix.fundtransfersaga.account.entity.account.FundsRemoved
 import com.klikix.fundtransfersaga.account.entity.account.FundsRemoveRollbacked
+import akka.stream.scaladsl.Source
+import akka.stream.OverflowStrategy
+import com.klikix.fundtransfersaga.transfer.impl.AccountSubscriberActor
+import com.lightbend.lagom.scaladsl.pubsub.PubSubRegistry
+import akka.actor.ActorSystem
+import akka.stream.scaladsl.Sink
+import akka.stream.Materializer
+import akka.NotUsed
 
-class AccountServiceImpl(registry: PersistentEntityRegistry)(implicit ec: ExecutionContext) extends AccountService with LazyLogging {
+class AccountServiceImpl(registry: PersistentEntityRegistry, pubSub: PubSubRegistry, system: ActorSystem)(implicit ec: ExecutionContext,materializer: Materializer) extends AccountService with LazyLogging {
   
   override def createAccount = ServerServiceCall { request =>
     logger.info(s"createAccount: $request")
@@ -107,6 +115,19 @@ class AccountServiceImpl(registry: PersistentEntityRegistry)(implicit ec: Execut
                                     request.rollbackReason))
     .transform(d=>d,
                transformFailed _) 
+  }
+  
+  override def accountStream(userUid: UUID) = { upstream =>
+    logger.debug("accountStream")
+    val downstream = Source.queue[TopicApiAccountEvent](100, OverflowStrategy.fail)
+    val result = downstream.mapMaterializedValue(downstreamSourceQueue =>{
+      val connectionUid = UUID.randomUUID
+      val subscriberActor = system.actorOf(AccountSubscriberActor.props(pubSub, downstreamSourceQueue, connectionUid, userUid),
+                                           s"AccountSubscriber-$connectionUid")
+      upstream.runWith(Sink.actorRef(subscriberActor, AccountSubscriberActor.Disconnect))
+      NotUsed
+    })
+    Future(result)
   }
   
   private def transformFailed(ex: Throwable): Throwable = {

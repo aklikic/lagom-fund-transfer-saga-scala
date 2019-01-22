@@ -47,5 +47,9 @@ class AccountServiceStub(implicit ec: ExecutionContext) extends AccountService w
     def accountEvents = {
       null
     }
+    
+    override def accountStream(userUid: UUID) = { downstream =>
+      null
+    }
   
 }

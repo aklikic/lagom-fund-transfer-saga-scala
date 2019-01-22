@@ -1,6 +1,5 @@
 package com.klikix.fundtransfersaga.account.impl
 
-import java.time.Duration
 import java.util.UUID
 
 import akka.stream.scaladsl.Sink
@@ -20,6 +19,11 @@ import com.klikix.fundtransfersaga.account.api.AccountStatus
 import com.klikix.fundtransfersaga.account.api.AccountEvent
 import com.klikix.fundtransfersaga.account.api.AccountCreated
 import com.klikix.fundtransfersaga.account.api.AccountClosed
+import akka.stream.scaladsl.Source
+import com.klikix.fundtransfersaga.account.api.AccountStreamAlive
+import java.util.concurrent.TimeUnit
+import akka.NotUsed
+import akka.stream.testkit.scaladsl.TestSink
 
 class AccountServiceImplIntegrationTest extends AsyncWordSpec with Matchers with BeforeAndAfterAll {
 
@@ -78,9 +82,43 @@ class AccountServiceImplIntegrationTest extends AsyncWordSpec with Matchers with
         events.drop(1).head shouldBe an[AccountClosed]
       }
     }
+    
+    "receive account events over stream" in {
+      val userUid = UUID.randomUUID
+      val ownerUid = UUID.randomUUID
+      val accountUid = UUID .randomUUID
+      val initialAmount = 0
+      val input : Source[AccountStreamAlive,NotUsed] = Source.single(AccountStreamAlive(true)).concat(Source.maybe)
+      accountService.accountStream(userUid).invoke(input).flatMap{ output =>
+        val probe = output.runWith(TestSink.probe(server.actorSystem))
+        for {
+          created <- createAccount(ownerUid, initialAmount)
+          closed <- closeAccount(created.accountUid)
+          retrieved <- getAccount(created.accountUid)
+          events: Seq[AccountEvent] <- accountService.accountEvents.subscribe.atMostOnceSource
+          .filter(_.accountUid == created.accountUid)
+          .take(2)
+          .runWith(Sink.seq)
+          
+        } yield {
+          retrieved.status should ===(AccountStatus.Closed)
+          events.size shouldBe 2
+          events.head shouldBe an[AccountCreated]
+          events.drop(1).head shouldBe an[AccountClosed]
+          probe.request(2)
+          probe.expectNext() shouldBe an[AccountCreated]
+          probe.expectNext() shouldBe an[AccountClosed]
+          probe.cancel
+          succeed
+        }
+      }  
+      
+    }
 
     //TODO other test cases
   }
+  
+  
 
   private def createAccount(ownerUid: UUID, initialAmount: Int) = {
     accountService.createAccount.invoke(CreateAccountRequest.apply(None, ownerUid, Some(initialAmount)))

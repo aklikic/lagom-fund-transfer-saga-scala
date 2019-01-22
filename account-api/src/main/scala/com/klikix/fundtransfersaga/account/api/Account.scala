@@ -17,6 +17,11 @@ object CreateAccountRequest {
   implicit val format: Format[CreateAccountRequest] = Json.format
 }
 
+case class AccountStreamAlive(alive: Boolean)
+object AccountStreamAlive {
+  implicit val format: Format[AccountStreamAlive] = Json.format
+}
+
 /*
  * Add funds
  */

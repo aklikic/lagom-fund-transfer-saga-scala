@@ -10,6 +10,7 @@ import com.lightbend.lagom.scaladsl.api.{Service, ServiceCall}
 import com.lightbend.lagom.scaladsl.api.broker.kafka.PartitionKeyStrategy
 import com.lightbend.lagom.scaladsl.api.broker.kafka.KafkaProperties
 import com.klikix.util.security.SecurityHeaderFilter
+import akka.stream.scaladsl.Source
 
 trait AccountService extends Service {
  
@@ -27,12 +28,15 @@ trait AccountService extends Service {
   
   def removeFundsRollback(accountUid: UUID): ServiceCall[RemoveFundsRollbackRequest,Done]
   
+  def accountStream(userUid: UUID): ServiceCall[Source[AccountStreamAlive,NotUsed],Source[AccountEvent,NotUsed]]
+  
   def accountEvents: Topic[AccountEvent]
 
   final override def descriptor = {
     import Service._
 
     named("account-service").withCalls(
+      pathCall("/api/accounts/stream/:userUid", accountStream _),
       restCall(Method.POST,"/api/accounts", createAccount),
       restCall(Method.DELETE, "/api/accounts/:accountUid", closeAccount _),
       restCall(Method.GET, "/api/accounts/:accountUid", getAccount _),

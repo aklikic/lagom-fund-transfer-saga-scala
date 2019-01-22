@@ -15,10 +15,12 @@ import org.scalatest.{BeforeAndAfterAll, Matchers, OptionValues, WordSpec}
 import com.klikix.fundtransfersaga.account.impl.AccountSerializerRegistry
 import com.klikix.fundtransfersaga.account.entity.account._
 import java.time.OffsetDateTime
+import com.lightbend.lagom.scaladsl.pubsub.PubSubRegistry
+import com.lightbend.lagom.internal.scaladsl.PubSubRegistryImpl
 
 class AccountEntitySpec extends WordSpec with Matchers with BeforeAndAfterAll with OptionValues {
   private val system = ActorSystem("test", JsonSerializerRegistry.actorSystemSetupFor(AccountSerializerRegistry))
-
+  
   override def afterAll = {
     TestKit.shutdownActorSystem(system)
   }
@@ -29,7 +31,7 @@ class AccountEntitySpec extends WordSpec with Matchers with BeforeAndAfterAll wi
   private val account = Account.apply(ownerUid, amount, AccountStatus.Created)
 
   private def withDriver[T](block: PersistentEntityTestDriver[AccountCommand, AccountEvent, Option[Account]] => T): T = {
-    val driver = new PersistentEntityTestDriver(system, new AccountEntity, accountUid.toString)
+    val driver = new PersistentEntityTestDriver(system, new AccountEntity(null), accountUid.toString)
     try {
       block(driver)
     } finally {

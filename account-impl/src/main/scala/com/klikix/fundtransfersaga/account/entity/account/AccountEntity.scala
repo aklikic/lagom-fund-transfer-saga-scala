@@ -10,10 +10,16 @@ import play.api.libs.json.{Format, Json}
 import com.klikix.util.general.JsonFormats._
 import java.time.OffsetDateTime
 import com.klikix.fundtransfersaga.account.entity.account._
+import com.lightbend.lagom.scaladsl.pubsub._
+import com.klikix.fundtransfersaga.account.impl.Mappers._
+import com.klikix.fundtransfersaga.account.api.{AccountEvent => ApiAccountEvent}
+import com.klikix.fundtransfersaga.account.impl.PubSub._
+import com.typesafe.scalalogging.LazyLogging
 
 
+class AccountEntity(pubSubRegistry: PubSubRegistry) extends PersistentEntity with LazyLogging {
 
-class AccountEntity extends PersistentEntity {
+  private val publishedTopic = pubSubRegistry.refFor(topicAll)
   override type Command = AccountCommand
   override type Event = AccountEvent
   override type State = Option[Account]
@@ -30,7 +36,8 @@ class AccountEntity extends PersistentEntity {
     Actions()
     .onCommand[CreateAccount, Done] {
       case (CreateAccount(account), ctx, state) =>
-        ctx.thenPersist(AccountCreated.apply(account,OffsetDateTime.now))(_ => ctx.reply(Done))
+        ctx.thenPersist(AccountCreated.apply(account,OffsetDateTime.now))(evt => {pubSub(evt) 
+                                                                                  ctx.reply(Done)})
     }.onEvent {
       case (AccountCreated(account, _), state) => Some(account)
     }.orElse(other(Some("Account does not exist")))
@@ -43,7 +50,8 @@ class AccountEntity extends PersistentEntity {
     }.onCommand[AddFunds,Done]{
       case (AddFunds(transactionUid,amountToAdd),ctx,_) => 
         val newAccount = account.addFunds(amountToAdd)
-        ctx.thenPersist(FundsAdded.apply(transactionUid,amountToAdd,newAccount.amount,account.amount,OffsetDateTime.now))(_ => ctx.reply(Done))
+        ctx.thenPersist(FundsAdded.apply(transactionUid,amountToAdd,newAccount.amount,account.amount,OffsetDateTime.now))(evt => {pubSub(evt) 
+                                                                                                                                  ctx.reply(Done)})
     }.onCommand[AddFundsRollback,Done]{
       case (AddFundsRollback(transactionUid,amountAdded,rollbackReason),ctx,state) => 
         val newAccount = account.addFundsRollback(amountAdded) 
@@ -51,7 +59,8 @@ class AccountEntity extends PersistentEntity {
           ctx.invalidCommand("After add rollback funds can not be less then 0")
           ctx.done
         }
-        ctx.thenPersist(FundsAddRollbacked.apply(transactionUid,amountAdded,newAccount.amount,state.get.amount,rollbackReason,OffsetDateTime.now))(_ => ctx.reply(Done))
+        ctx.thenPersist(FundsAddRollbacked.apply(transactionUid,amountAdded,newAccount.amount,state.get.amount,rollbackReason,OffsetDateTime.now))(evt => {pubSub(evt) 
+                                                                                                                                                           ctx.reply(Done)})
     }.onCommand[RemoveFunds,Done]{
       case (RemoveFunds(transactionUid,amountToRemove),ctx,_) => 
         val newAccount = account.removeFunds(amountToRemove)
@@ -59,11 +68,13 @@ class AccountEntity extends PersistentEntity {
           ctx.invalidCommand("Insufficient funds")
           ctx.done
         }
-        ctx.thenPersist(FundsRemoved.apply(transactionUid,amountToRemove,newAccount.amount,account.amount,OffsetDateTime.now))(_ => ctx.reply(Done))
+        ctx.thenPersist(FundsRemoved.apply(transactionUid,amountToRemove,newAccount.amount,account.amount,OffsetDateTime.now))(evt => {pubSub(evt) 
+                                                                                                                                       ctx.reply(Done)})
     }.onCommand[RemoveFundsRollback,Done]{
       case (RemoveFundsRollback(transactionUid,amountRemoved,rollbackReason),ctx,_) => 
         val newAccount = account.removeFundsRollback(amountRemoved) 
-        ctx.thenPersist(FundsRemoveRollbacked.apply(transactionUid,amountRemoved,newAccount.amount,account.amount,rollbackReason,OffsetDateTime.now))(_ => ctx.reply(Done))
+        ctx.thenPersist(FundsRemoveRollbacked.apply(transactionUid,amountRemoved,newAccount.amount,account.amount,rollbackReason,OffsetDateTime.now))(evt => {pubSub(evt) 
+                                                                                                                                                              ctx.reply(Done)})
     
     }.onCommand[CloseAccount.type,Done]{
       case (_,ctx,_) => 
@@ -72,7 +83,8 @@ class AccountEntity extends PersistentEntity {
           ctx.done
         }
         val closedAccount = account.close
-        ctx.thenPersist(AccountClosed.apply(closedAccount,OffsetDateTime.now))(_ => ctx.reply(Done))
+        ctx.thenPersist(AccountClosed.apply(closedAccount,OffsetDateTime.now))(evt => {pubSub(evt) 
+                                                                                       ctx.reply(Done)})
     }.onEvent {
       case (FundsAdded( _, amountToAdd, _, _, _), state) => state.map(_.addFunds(amountToAdd))
       case (FundsAddRollbacked( _, amountAdded, _, _, _, _), state) => state.map(_.addFundsRollback(amountAdded))
@@ -109,6 +121,9 @@ class AccountEntity extends PersistentEntity {
     }
   }
 
+  private def pubSub(evt: AccountEvent):Unit = {
+    publish(entityUid(), evt, publishedTopic)
+  }
   
   private def entityUid(): UUID = {
     UUID.fromString(entityId)
