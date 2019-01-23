@@ -10,8 +10,7 @@ organization in ThisBuild := "com.klikix"
 
 // the Scala version that will be used for cross-compiled libraries
 scalaVersion in ThisBuild := "2.12.7"
-EclipseKeys.projectFlavor in Global := EclipseProjectFlavor.Scala
-reactiveLibVersion in ThisBuild := "0.9.3"
+EclipseKeys.projectFlavor in Global := EclipseProjectFlavor.ScalaIDE
 
 version in ThisBuild := "1.0.0-SNAPSHOT"
 
@@ -52,6 +51,7 @@ lazy val accountImpl = (project in file("account-impl"))
       lagomScaladslPersistenceCassandra,
       lagomScaladslTestKit,
       lagomScaladslKafkaBroker,
+      lagomScaladslPubSub,
       cassandraDriverExtras,
       macwire,
       scalaTest,
@@ -59,7 +59,7 @@ lazy val accountImpl = (project in file("account-impl"))
     )
   )
   .settings(lagomForkedTestSettings: _*)
-  .dependsOn(accountApi)
+  .dependsOn(accountApi, util)
 
 lazy val fundTransferApi = (project in file("fund-transfer-api"))
   .settings(commonSettings: _*)
@@ -86,7 +86,8 @@ lazy val fundTransferImpl = (project in file("fund-transfer-impl"))
     )
   )
   .settings(lagomForkedTestSettings: _*)
-  .dependsOn(fundTransferApi,accountApi)
+  .dependsOn(fundTransferApi,accountApi,util)
+
 
 def evictionSettings: Seq[Setting[_]] = Seq(
   // This avoids a lot of dependency resolution warnings to be showed.
