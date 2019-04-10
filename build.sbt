@@ -22,6 +22,14 @@ val mockito = "org.mockito" % "mockito-core" % "2.23.4" % Test
 val scalaLogging = "com.typesafe.scala-logging" %% "scala-logging" % "3.9.0"
 val cassandraDriverExtras = "com.datastax.cassandra" % "cassandra-driver-extras" % "3.0.0"
 
+// use a locally installed instance of kafka.
+lagomKafkaEnabled in ThisBuild := false
+lagomKafkaAddress in ThisBuild := "localhost:9092"
+
+// use a locally installed instance of cassandra.
+lagomCassandraEnabled in ThisBuild := false
+lagomUnmanagedServices in ThisBuild += ("cas_native" -> "http://localhost:9042")
+
 lazy val util = (project in file("util"))
   .settings(commonSettings: _*)
   .settings(
